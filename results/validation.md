@@ -45,6 +45,35 @@ few seconds before the delivery push-off; detected ends land within ~5 s of the
 rocks coming to rest. Not yet frame-exact ground truth — good enough for shot
 counting, attribution, and per-shot timing stats.
 
+## Shot phases + result coordinates (src/phases.py)
+
+Per-shot phase coverage on the test end (16 shots):
+
+- slide begin: 15/16 (shot 16 missed — sweepers stage at the delivery hogline
+  during the skip's setup, pinning the body-front signal that the slide
+  detector relies on)
+- release: 15/16; near hogline: 13/16; far hogline: 12/16; stop: 12/16
+- resting position: 16/16 (12 from the arrival-cam dot track, 4 from the
+  pre/post house-state diff fallback)
+
+Spot validation against frame review:
+- shot 2 slide 82.3 vs ~83 observed; shot 11 slide 507.9 vs ~509;
+  shot 15 slide 812.0 vs ~812.6
+- shot 1 resting position (46.1, -111.4) in vs hand-measured (47.1, -110.4)
+- shot 5 stop at 263.2 confirmed in frames (stone glides 11 s past the
+  down-ice motion-segment end — phase 7 must come from the house cam)
+
+Known limitations (v1):
+- backline cross (phase 3) not separately observable: the thrower's body
+  extends past the backline at setup; it is ~1 s after slide begin
+- mid-sheet (between the hoglines, ~72 ft) is unviewed by the house cams;
+  the stone handle is also hidden under the hand until release, so phases
+  4-5 rely on small-dot detection near the delivery cam's fringe and carry
+  ~1 s of noise (shot 2's near-hog time is likely a broom false positive)
+- result positions degrade toward the cam fringe (long guards / through
+  stones); takeout tracking of displaced stones is not attempted yet
+- positions are where each stone stopped; later shots may move it
+
 ## Discarded approaches (for the record)
 
 - *Persistent house-strip pixel change pre/post segment*: fails — neighboring
