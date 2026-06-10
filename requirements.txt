@@ -1,0 +1,7 @@
+yt-dlp[default]
+yt-dlp-ejs
+bgutil-ytdlp-pot-provider
+opencv-python-headless
+numpy
+scipy
+matplotlib

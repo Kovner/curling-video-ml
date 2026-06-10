@@ -1,0 +1,5 @@
+__pycache__/
+*.mp4
+*.webm
+*.mkv
+data/sb_tiles/
