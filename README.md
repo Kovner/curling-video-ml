@@ -62,8 +62,34 @@ burst begins in the delivery-end camera, shot end = motion settles in the house 
 scripts/download.sh          # yt-dlp invocation that works for this stream
 src/extract_storyboard.py    # storyboard .mhtml -> timestamped frame tiles
 src/analyze_storyboard.py    # tiles -> motion signal -> shot peaks (coarse, ~10s)
-src/detect_shots.py          # full video -> precise shot start/end segments (CSV)
+src/detect_shots.py          # full video -> shot start/end segments (CSV)
+src/phases.py                # shots -> per-shot phase times + result coordinates
+src/shot_chart.py            # phases.csv -> shot chart on a to-scale house
+src/make_review.py           # annotated review reel + per-shot contact sheet
 ```
+
+### Shot phases and result (src/phases.py)
+
+For each detected shot, `phases.py` marks:
+
+| # | phase | how it's measured |
+|---|-------|-------------------|
+| 1 | pre-shot | previous shot's stop |
+| 2 | slide begins | delivery house cam: thrower's body-blob front starts its terminal advance through the house |
+| 3 | crosses backline | *not separately observable on this rink* — the thrower's body extends past the backline at setup; ≈ t2 + ~1 s |
+| 4 | release | the handle color appears as a dot in the delivery zone (the hand covers it during the slide) |
+| 5 | crosses near hogline | handle dot reaches the delivery cam's hogline (edge of view) |
+| 6 | crosses far hogline | arrival cam: tracked stone dot crosses the hogline |
+| 7 | stone stops | arrival cam: dot track goes stationary |
+
+Result: resting (x, y) in **inches from the pin** (x right of centerline as seen
+in the arrival cam, y past the pin), calibrated from an ellipse fit of the green
+12-ft ring. Verified against a hand-measured stone position to within ~1.5 in.
+
+Key lesson: the down-ice motion segment under-covers the shot — the slide starts
+~3 s before it and the stone keeps gliding up to ~11 s after it (sweepers stop
+moving, the stone doesn't). Phases 2 and 7 therefore come from the house cams,
+not the down-ice segmentation.
 
 ### Coarse storyboard analysis (works anywhere, reproducible from checked-in data)
 

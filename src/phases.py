@@ -131,6 +131,15 @@ def track_delivery(cap, t_seed, calib, fps=8.0):
                          if dcal["hog_y"] - 6 <= d[2] <= dcal["back_y"] + 8]
                         if f is not None else [])
 
+    # median-smooth the front series (interpolating gaps) so single-sample
+    # flickers don't split the slide into disqualified fragments
+    idx = [i for i, f in enumerate(fronts) if f is not None]
+    if len(idx) >= 5:
+        filled = np.interp(np.arange(len(fronts)), idx, [fronts[i] for i in idx])
+        k = 5
+        pad = np.pad(filled, k // 2, mode="edge")
+        fronts = [float(np.median(pad[i:i + k])) for i in range(len(fronts))]
+
     t2 = t3 = t4 = t5 = None
     # phase 2: the slide is the advancing run (decreasing front y) that exits
     # the view through the hogline region. Between-shot fidgeting at the hack
@@ -160,11 +169,13 @@ def track_delivery(cap, t_seed, calib, fps=8.0):
     qual = []
     for a, b in runs:
         seg = [f for f in fronts[a:b + 1] if f is not None]
-        if seg and seg[0] >= 225 and min(seg) <= dcal["hog_y"] + 12 and seg[0] - min(seg) >= 40:
+        if (seg and ts[b] - ts[a] >= 1.0 and seg[0] >= 225
+                and min(seg) <= dcal["hog_y"] + 12 and seg[0] - min(seg) >= 40):
             qual.append((a, b))
-    qual = [q for q in qual if ts[q[0]] <= t_seed + 4]
+    # the slide ends (front exits via the hogline) right as down-ice sweeping
+    # ramps up, i.e. near the motion-segment seed
     if qual:
-        a, b = qual[-1]
+        a, b = min(qual, key=lambda q: abs(ts[q[1]] - t_seed))
         t2 = ts[a]
     # phase 3 (backline cross) is not separately observable on this rink: the
     # thrower's body already extends past the backline at setup, and the stone
