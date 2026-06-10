@@ -132,37 +132,50 @@ def track_delivery(cap, t_seed, calib, fps=8.0):
                         if f is not None else [])
 
     t2 = t3 = t4 = t5 = None
-    # phase 2: sustained advance (decreasing front y) starting in the house/hack zone
-    run, run_start, start_front = 0, None, None
+    # phase 2: the slide is the advancing run (decreasing front y) that exits
+    # the view through the hogline region. Between-shot fidgeting at the hack
+    # also advances, but never gets near the hog. Take the latest qualifying
+    # run that starts before the down-ice motion segment is underway.
+    runs = []
+    run_start = None
     prev = None
+    stall = 0
     for i, fr in enumerate(fronts):
         if fr is None:
             continue
-        if prev is not None and fr < prev - 0.5:
-            if run == 0:
-                run_start, start_front = i - 1, prev
-            run += 1
-            if run >= 4 and start_front - fr > 12 and start_front > dcal["pin"][1] - 25:
-                t2 = ts[run_start]
-                break
+        if prev is not None and fr < prev + 1:   # advancing or holding
+            if run_start is None and fr < prev - 0.5:
+                run_start = i - 1
+            stall = 0 if fr < prev - 0.5 else stall + 1
+            if stall > 4 and run_start is not None:
+                runs.append((run_start, i))
+                run_start = None
         else:
-            run = 0
+            if run_start is not None:
+                runs.append((run_start, i))
+                run_start = None
         prev = fr
-    # phase 3: front crosses the backline (back edge of the house rings)
+    if run_start is not None:
+        runs.append((run_start, len(fronts) - 1))
+    qual = []
+    for a, b in runs:
+        seg = [f for f in fronts[a:b + 1] if f is not None]
+        if seg and seg[0] >= 225 and min(seg) <= dcal["hog_y"] + 12 and seg[0] - min(seg) >= 40:
+            qual.append((a, b))
+    qual = [q for q in qual if ts[q[0]] <= t_seed + 4]
+    if qual:
+        a, b = qual[-1]
+        t2 = ts[a]
+    # phase 3 (backline cross) is not separately observable on this rink: the
+    # thrower's body already extends past the backline at setup, and the stone
+    # itself is hidden under the hand. Left blank.
+    # phase 4: the handle dot appears in the delivery zone once the hand lets
+    # go (it is covered during the slide)
     if t2 is not None:
-        for i, fr in enumerate(fronts):
-            if fr is None or ts[i] < t2:
+        for i, ds in enumerate(dotlists):
+            if ts[i] <= t2 + 0.5:
                 continue
-            if fr <= dcal["back_y"]:
-                t3 = ts[i]
-                break
-    # phase 4: handle dot separated ahead of the body
-    if t2 is not None:
-        for i, (fr, ds) in enumerate(zip(fronts, dotlists)):
-            if ts[i] <= t2 or not ds:
-                continue
-            front = fr if fr is not None else 360
-            if any(d[2] < front - 5 for d in ds):
+            if any(dcal["hog_y"] + 4 <= d[2] <= dcal["back_y"] for d in ds):
                 t4 = ts[i]
                 break
     # phase 5: dot reaches the delivery hogline (edge of this cam's view)
