@@ -172,6 +172,12 @@ def main():
         for i, (s, e) in enumerate(segs, 1):
             w.writerow([i, round(t[s], 1), round(t[e], 1), round(t[e] - t[s], 1),
                         round(float(sig[s : e + 1].max()), 2)])
+    rej_path = os.path.splitext(args.out)[0] + "_rejected.csv"
+    with open(rej_path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["start_s", "end_s"])
+        for s, e in rejected:
+            w.writerow([round(t[s], 1), round(t[e], 1)])
     print(f"{len(segs)} shots ({len(rejected)} walk-bys rejected) -> {args.out}")
     for i, (s, e) in enumerate(segs, 1):
         m0, s0 = divmod(int(t[s]), 60)
