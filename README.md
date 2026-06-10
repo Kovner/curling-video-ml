@@ -9,7 +9,27 @@ Test video: https://www.youtube.com/watch?v=a2EJcV29ido
 ("6/8 - Sheet 1 - Spring Monday Open League 2026"), focusing on the end at
 **15:22 – 30:58** for prototyping.
 
-## Findings so far (proof of concept)
+## Status: shot boundary detection works on real video
+
+On the real 15:22–30:58 clip (`data/end_test.mp4`), `src/detect_shots.py` detects
+**16/16 shots with 0 false positives**, rejecting all 3 "walk-by" events (players
+walking down the ice between shots). See `results/validation.md` for how ground
+truth was established and `results/shots.csv` for the boundaries.
+
+Two findings that made it work:
+
+1. **Per-panel normalization.** Each down-ice camera gets its own robust z-score
+   and the per-sample max is used. Summing the panels first dilutes deliveries
+   seen mostly by the far camera (this missed the first shot of the test end).
+2. **House-cam phase ordering rejects walk-bys.** A shot crosses the
+   delivery-end house cam early in its motion segment and reaches the arrival
+   house late; a walker returning to the delivery end crosses the houses in the
+   opposite order. Down-ice motion alone cannot make this distinction.
+
+Detected shot durations already show the expected pattern: ~9–20 s for early
+(lead/second) stones, stretching to 24–31 s for the final skip stones.
+
+## Earlier findings (storyboard proof of concept)
 
 The stream is a fixed-layout composite of three views:
 
@@ -60,9 +80,11 @@ python src/analyze_storyboard.py data/sb_tiles --start 922 --end 1858 --out resu
 python src/detect_shots.py data/end_test.mp4 --plot --out results/shots.csv
 ```
 
-`detect_shots.py` samples the video at ~4 fps, computes motion energy in the three
-camera regions, and segments shots with hysteresis thresholding (a shot is "active"
-while motion stays elevated; boundaries are walked out to the quiet baseline).
+`detect_shots.py` samples the video at ~4 fps, computes motion energy per camera
+region, segments candidates with hysteresis thresholding (a shot is "active" while
+motion stays elevated; boundaries are walked out to the quiet baseline), then
+rejects walk-bys using the house-cam phase rule. Play direction is auto-detected
+(`--direction` to force it).
 
 ## Environment limitation (why storyboards?)
 
@@ -76,10 +98,14 @@ and everything in `detect_shots.py` applies to the real frames.
 
 ## Next steps
 
-- [ ] Run `detect_shots.py` on the real 15:22–30:58 clip; hand-label ground truth
-      shot boundaries and measure precision/recall of the segmentation.
-- [ ] Use the overhead house cams to detect "all rocks stopped" for precise shot end.
+- [x] Run `detect_shots.py` on the real 15:22–30:58 clip and validate against
+      ground truth: 16/16 shots, 0 false positives (`results/validation.md`).
+- [ ] Validate on more ends / a full game (end breaks, between-end practice
+      slides, and same-direction walkers are untested failure modes).
+- [ ] Frame-exact boundary ground truth; tighten "all rocks stopped" using the
+      house cam (stone-handle HSV detection already prototyped — stones are
+      cleanly detectable as red/yellow dots, see validation notes).
+- [ ] Team attribution: stones alternate, and handle color of the delivered
+      stone is detectable in the house cam.
 - [ ] OCR the burned-in clock to make timing robust to stream gaps.
-- [ ] Classify which end is delivering (left vs right panel motion) -> alternating
-      team attribution.
-- [ ] Stone detection/tracking in the house cam -> shot type + make/miss inference.
+- [ ] Stone tracking in the house cam -> shot type + make/miss inference.
