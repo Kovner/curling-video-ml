@@ -49,12 +49,21 @@ counting, attribution, and per-shot timing stats.
 
 Per-shot phase coverage on the test end (16 shots):
 
-- slide begin: 15/16 (shot 16 missed — sweepers stage at the delivery hogline
-  during the skip's setup, pinning the body-front signal that the slide
-  detector relies on)
-- release: 15/16; near hogline: 13/16; far hogline: 12/16; stop: 12/16
+- slide begin: 16/16 (sweepers staged at the delivery hogline used to pin
+  the body-front signal and mask the skip stones; mask-edge blobs are now
+  excluded)
+- release (sweep-onset proxy): 14/16; near hogline: 11/16
+- far hogline: 12/16; stop: 16/16 (anchored search around the known rest
+  position recovers stops that blind chaining missed)
 - resting position: 16/16 (12 from the arrival-cam dot track, 4 from the
   pre/post house-state diff fallback)
+
+Phase-frame verification (results/phase_sheet_*.jpg, one frame per detected
+phase per shot): slide frames show the thrower at/leaving the hack; several
+release frames show the stone dot visibly ahead of the thrower (shots 2, 4,
+6, 7, 8); stop frames show the stone at its final position. Kinematic gaps
+are physically plausible across all shots (release 1.2-3.1 s after slide,
+hog-to-hog 9-17 s).
 
 Spot validation against frame review:
 - shot 2 slide 82.3 vs ~83 observed; shot 11 slide 507.9 vs ~509;
