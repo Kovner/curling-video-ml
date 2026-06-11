@@ -5,10 +5,11 @@ Phases (times in seconds on the video clock):
   1 pre-shot      from the previous shot's stop until the slide begins
   2 slide_begin   thrower pushes out of the hack (delivery house cam)
   3 backline      stone/thrower front crosses the backline (delivery cam)
-  4 release       shooter lets go: the handle color becomes visible as a dot
-                  separated ahead of the thrower's body blob (delivery cam)
-  5 near_hog      stone reaches the delivery-end hogline (edge of the
-                  delivery cam's view)
+  4 release       shooter lets go. Measured via sweep onset (sweepers engage
+                  the moment the stone leaves the hand): the first small
+                  rising dot chain in the delivery corridor. ~+/-1 s.
+  5 near_hog      stone/sweep group reaches the delivery-end hogline (edge
+                  of the delivery cam's view). ~+/-1 s.
   6 far_hog       stone crosses the arrival-end hogline (arrival cam)
   7 stop          stone comes to rest (arrival cam dot track stabilizes)
 
@@ -53,7 +54,7 @@ def median_strip(cap, t0, t1, n=9):
 
 
 def detect_dots(bgr, min_area=2, max_area=120):
-    """Stone-handle colored (red/yellow) blobs: (color, x, y)."""
+    """Stone-handle colored (red/yellow) blobs: (color, x, y, area)."""
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     masks = {
@@ -65,7 +66,8 @@ def detect_dots(bgr, min_area=2, max_area=120):
         n, lab, stats, cents = cv2.connectedComponentsWithStats(m.astype(np.uint8))
         for i in range(1, n):
             if min_area <= stats[i, cv2.CC_STAT_AREA] <= max_area:
-                out.append((color, float(cents[i][0]), float(cents[i][1])))
+                out.append((color, float(cents[i][0]), float(cents[i][1]),
+                            int(stats[i, cv2.CC_STAT_AREA])))
     return out
 
 
@@ -179,48 +181,52 @@ def track_delivery(cap, t_seed, calib, fps=8.0):
         if (seg and ts[b] - ts[a] >= 1.0 and seg[0] >= 225
                 and min(seg) <= dcal["hog_y"] + 12 and seg[0] - min(seg) >= 40):
             qual.append((a, b))
-    # phase 4/5: the released stone is a handle dot strictly AHEAD of (above)
-    # the thrower's body blob, advancing across frames. The handle is covered
-    # by the hand until release, and clothing-colored dots (pink jackets read
-    # as red) move WITH the body, so the ahead-of-front constraint kills them.
-    chain = []
-    for i, ds in enumerate(dotlists):
-        front = fronts_raw[i] if fronts_raw[i] is not None else 360
-        ahead = [d for d in ds if d[2] < front - 3]
-        if not ahead:
-            continue
-        d = min(ahead, key=lambda d: d[2])
-        if chain and not (ts[i] - chain[-1][0] <= 2.0 and d[2] <= chain[-1][2] + 2
-                          and abs(d[1] - chain[-1][1]) < 15):
-            if len(chain) >= 2:
-                break  # established chain ended; ignore later noise
-            chain = []
-        chain.append((ts[i], d[1], d[2]))
-    if len(chain) >= 2 and chain[0][2] - chain[-1][2] >= 8:
-        t4 = chain[0][0]
-        below = [(t, y) for t, x, y in chain if y > dcal["hog_y"] + 3]
-        crossed = [(t, y) for t, x, y in chain if y <= dcal["hog_y"] + 3]
-        if crossed:
-            t5 = crossed[0][0]
-        elif len(below) >= 2 and below[-1][1] < below[0][1]:
-            # extrapolate the dot's velocity to the hogline (handle becomes
-            # too small to detect near the cam fringe)
-            (ta, ya), (tb, yb) = below[0], below[-1]
-            v = (ya - yb) / (tb - ta)
-            dt = (yb - (dcal["hog_y"] + 3)) / v
-            if 0 < dt <= 3.0:
-                t5 = tb + dt
-    # the slide ends (front exits via the hogline) right as the stone is
-    # released; anchor on the release when we have it, else on the down-ice
-    # motion-segment seed
+    # the slide ends (front exits via the hogline) right as down-ice sweeping
+    # ramps up, i.e. near the motion-segment seed
     if qual:
-        anchor = t4 if t4 is not None else t_seed
-        near = [q for q in qual if anchor - 6 <= ts[q[1]] <= anchor + 2] if t4 else qual
-        pool = near or qual
-        a, b = min(pool, key=lambda q: abs(ts[q[1]] - anchor))
+        a, b = min(qual, key=lambda q: abs(ts[q[1]] - t_seed))
         t2 = ts[a]
-        if t4 is not None and t4 < t2:
-            t4 = t5 = None  # release can't precede the slide; drop as noise
+    # phase 4 (release, sweep-onset proxy): true handle separation is not
+    # observable at this resolution (the thrower's head/shoulders lead the
+    # blob, hiding the stone, and clothing can read as handle-colored). But
+    # sweepers engage the moment the stone leaves the hand, so the first
+    # SMALL (broom-pad/handle sized, not jacket sized) rising dot chain in
+    # the delivery corridor after the slide is release to within ~1 s.
+    if t2 is not None:
+        chains = []
+        for i, ds in enumerate(dotlists):
+            if ts[i] < t2 + 1.2:
+                continue
+            for d in ds:
+                if d[3] > 30 or abs(d[1] - dcal["pin"][0]) > 40:
+                    continue
+                best = None
+                for ch in chains:
+                    lt, lx, ly = ch[-1]
+                    if (ts[i] - lt <= 2.0 and d[2] <= ly + 2 and abs(d[1] - lx) < 15
+                            and (best is None or ly < best[-1][2])):
+                        best = ch
+                if best is not None:
+                    best.append((ts[i], d[1], d[2]))
+                else:
+                    chains.append([(ts[i], d[1], d[2])])
+        chains = [c for c in chains if len(c) >= 2 and c[0][2] - c[-1][2] >= 6]
+        chain = min(chains, key=lambda c: c[0][0]) if chains else []
+        if chain:
+            t4 = chain[0][0]
+            # phase 5: the sweep/stone group reaches the delivery hogline.
+            # Trigger just below the line: red dots merge with the red
+            # hogline pixels into one oversized component right at it.
+            crossed = [(t, y) for t, x, y in chain if y <= dcal["hog_y"] + 14]
+            if crossed:
+                t5 = crossed[0][0]
+            else:
+                for i, ds in enumerate(dotlists):
+                    if ts[i] <= t4:
+                        continue
+                    if any(d[3] <= 30 and d[2] <= dcal["hog_y"] + 14 for d in ds):
+                        t5 = ts[i]
+                        break
     # phase 3 (backline cross) is not separately observable on this rink: the
     # thrower's body already extends past the backline at setup, and the stone
     # itself is hidden under the hand. Left blank.
@@ -256,10 +262,10 @@ def track_arrival(cap, s, e, calib, fps=8.0):
         f = read_strip(cap, t)
         if f is None:
             continue
-        for c, x, y in detect_dots(f):
+        for c, x, y, _a in detect_dots(f):
             if y >= 182:
                 continue
-            if any((x - rx) ** 2 + (y - ry) ** 2 <= 64 for _, rx, ry in rest):
+            if any((x - rx) ** 2 + (y - ry) ** 2 <= 64 for _, rx, ry, *_ in rest):
                 continue
             best = None
             for ch in chains:
@@ -294,7 +300,7 @@ def track_arrival(cap, s, e, calib, fps=8.0):
         # fallback: stone added to the house state
         post = median_strip(cap, e + 10, e + 24, n=9)
         added = [d for d in detect_dots(post) if d[2] < 180 and
-                 all((d[1] - rx) ** 2 + (d[2] - ry) ** 2 > 36 for _, rx, ry in rest)]
+                 all((d[1] - rx) ** 2 + (d[2] - ry) ** 2 > 36 for _, rx, ry, *_ in rest)]
         if added:
             d = max(added, key=lambda d: d[2])  # frontmost new stone
             x_px, y_px = d[1], d[2]
@@ -308,7 +314,7 @@ def track_arrival(cap, s, e, calib, fps=8.0):
                 f = read_strip(cap, t)
                 if f is None:
                     continue
-                for c, x, y in detect_dots(f, min_area=1):
+                for c, x, y, _a in detect_dots(f, min_area=1):
                     if (x - x_px) ** 2 + (y - y_px) ** 2 <= 16:
                         at_rest.append(t)
                     elif (acal["hog_y"] - 4 <= y <= acal["hog_y"] + 8

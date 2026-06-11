@@ -66,10 +66,15 @@ Spot validation against frame review:
 Known limitations (v1):
 - backline cross (phase 3) not separately observable: the thrower's body
   extends past the backline at setup; it is ~1 s after slide begin
-- mid-sheet (between the hoglines, ~72 ft) is unviewed by the house cams;
-  the stone handle is also hidden under the hand until release, so phases
-  4-5 rely on small-dot detection near the delivery cam's fringe and carry
-  ~1 s of noise (shot 2's near-hog time is likely a broom false positive)
+- release (phase 4) is measured via sweep onset, not true handle
+  separation: at this resolution the thrower's head/shoulders lead the
+  body blob (hiding the stone) and clothing can read as handle-colored
+  (a pink jacket produced 100-150 px "red" blobs; real handle/broom dots
+  are 1-25 px, so a 30 px area cap separates them). Sweepers engage at
+  release, so the proxy carries ~±1 s
+- near hog (phase 5) triggers a stone-diameter early: red dots merge with
+  the red hogline pixels into one oversized component right at the line
+- mid-sheet (between the hoglines, ~72 ft) is unviewed by the house cams
 - result positions degrade toward the cam fringe (long guards / through
   stones); takeout tracking of displaced stones is not attempted yet
 - positions are where each stone stopped; later shots may move it
