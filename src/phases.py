@@ -101,7 +101,13 @@ def calibrate(cap, quiet_times):
                     "hog_y": find_hogline(strip, (int(ty + try_) + 5, 178))},
         "delivery": {"pin": [bx, by], "px_per_in": [brx / 72.0, bry / 72.0],
                      "hog_y": find_hogline(strip, (182, int(by - bry) - 5)),
-                     "back_y": by + bry},
+                     "back_y": by + bry,
+                     # y row -> feet in front of the tee, for velocity
+                     # extrapolation across the fisheye fringe where the
+                     # handle drops below a pixel (piecewise linear between
+                     # known landmarks: tee, front ring edge, hogline)
+                     "y_ft": [[by, 0.0], [by - bry, 6.0],
+                              [float(find_hogline(strip, (182, int(by - bry) - 5))), 21.0]]},
     }
 
 
@@ -214,13 +220,28 @@ def track_delivery(cap, t_seed, calib, fps=8.0):
         chain = min(chains, key=lambda c: c[0][0]) if chains else []
         if chain:
             t4 = chain[0][0]
-            # phase 5: the sweep/stone group reaches the delivery hogline.
-            # Trigger just below the line: red dots merge with the red
-            # hogline pixels into one oversized component right at it.
+            # phase 5: the rock crosses the delivery hogline. Measured
+            # directly when the dot track reaches the line region (trigger
+            # just below it: red handles merge with the red hogline pixels);
+            # otherwise extrapolated from the rock's own velocity in feet --
+            # the handle drops below a pixel in the last feet of the
+            # fisheye's view, so there is nothing left to detect there.
             crossed = [(t, y) for t, x, y in chain if y <= dcal["hog_y"] + 14]
             if crossed:
                 t5 = crossed[0][0]
             else:
+                ys = [r[0] for r in dcal["y_ft"]][::-1]
+                fts = [r[1] for r in dcal["y_ft"]][::-1]
+                phys = [(t, float(np.interp(y, ys, fts))) for t, x, y in chain]
+                tail = phys[-3:]
+                if len(tail) >= 2 and tail[-1][1] - tail[0][1] >= 2.0:
+                    v = (tail[-1][1] - tail[0][1]) / (tail[-1][0] - tail[0][0])
+                    dt = (21.0 - tail[-1][1]) / v
+                    if 0 < dt <= 4.0:
+                        t5 = tail[-1][0] + dt
+            if t5 is None:
+                # last resort: any small dot reaching the line region (the
+                # sweep group crosses with the rock, within ~1 s)
                 for i, ds in enumerate(dotlists):
                     if ts[i] <= t4:
                         continue
