@@ -359,6 +359,39 @@ def track_arrival(cap, s, e, calib, fps=8.0):
     return t6, t7, x_in, y_in, method
 
 
+def kinematic_fill(t5, t6, t7, y_in):
+    """Fill a missing hogline crossing from the other measured anchors.
+
+    Constant-deceleration model between the near hogline and the stop. With
+    the hog-to-hog distance fixed at 72 ft and the rest position giving the
+    distance past the far hogline, (t5, t7) or (t6, t7) fully determine the
+    deceleration -- no free parameters. The crossing the cameras can't see
+    (sweepers over the rock, lens fringe, red-on-red at the line) is then
+    computable to ~1 s. Returns (t5, t6, list_of_filled_names).
+    """
+    filled = []
+    if t7 is None or y_in is None:
+        return t5, t6, filled
+    d_rest = (252.0 + y_in) / 12.0  # ft past the far hogline
+    if d_rest <= 0.5:
+        return t5, t6, filled
+    if t6 is None and t5 is not None and t7 > t5:
+        T = t7 - t5
+        a = 2 * (72.0 + d_rest) / T ** 2
+        disc = T ** 2 - 144.0 / a
+        if disc > 0:
+            t6 = t5 + (T - disc ** 0.5)
+            filled.append("t6")
+    elif t5 is None and t6 is not None and t7 > t6:
+        T2 = t7 - t6
+        v6 = 2 * d_rest / T2
+        a = v6 / T2
+        v5 = (v6 ** 2 + 2 * a * 72.0) ** 0.5
+        t5 = t6 - (v5 - v6) / a
+        filled.append("t5")
+    return t5, t6, filled
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
@@ -382,20 +415,23 @@ def main():
         s, e = float(r["start_s"]), float(r["end_s"])
         t2, t3, t4, t5 = track_delivery(cap, s, calib)
         t6, t7, x_in, y_in, method = track_arrival(cap, s, e, calib)
+        t5, t6, filled = kinematic_fill(t5, t6, t7, y_in)
         t1 = prev_stop
         prev_stop = t7 if t7 is not None else e
         fmt = lambda v, nd=1: round(v, nd) if v is not None else ""
+        notes = ",".join(f"{n}:kin" for n in filled)
         rows.append([k, fmt(t1), fmt(t2), fmt(t3), fmt(t4), fmt(t5), fmt(t6), fmt(t7),
-                     fmt(x_in), fmt(y_in), method])
+                     fmt(x_in), fmt(y_in), method, notes])
         print(f"shot {k:2d}: pre={fmt(t1)} slide={fmt(t2)} back={fmt(t3)} "
               f"release={fmt(t4)} near_hog={fmt(t5)} far_hog={fmt(t6)} stop={fmt(t7)} "
-              f"result=({fmt(x_in)},{fmt(y_in)}) in [{method}]")
+              f"result=({fmt(x_in)},{fmt(y_in)}) in [{method}] {notes}")
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["shot", "t1_preshot", "t2_slide", "t3_backline", "t4_release",
-                    "t5_near_hog", "t6_far_hog", "t7_stop", "x_in", "y_in", "result_method"])
+                    "t5_near_hog", "t6_far_hog", "t7_stop", "x_in", "y_in",
+                    "result_method", "inferred"])
         w.writerows(rows)
     print(f"-> {args.out}")
 
