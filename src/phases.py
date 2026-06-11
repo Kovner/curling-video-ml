@@ -106,15 +106,21 @@ def calibrate(cap, quiet_times):
 # ---------------------------------------------------------------- delivery
 
 def delivery_front(frame, quiet, hog_y):
-    """Leading (lowest-y) edge of moving bodies below the delivery hogline."""
+    """Leading (lowest-y) edge of moving bodies below the delivery hogline.
+
+    Blobs touching the mask edge are excluded: sweepers staged at the hogline
+    sit half-out of the masked region and would otherwise pin the front there,
+    hiding the thrower's slide behind them (this masked shot 16's slide).
+    """
     d = cv2.absdiff(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY),
                     cv2.cvtColor(quiet, cv2.COLOR_BGR2GRAY))
     m = (d > 28).astype(np.uint8)
-    m[: hog_y - 8] = 0
+    edge = hog_y - 8
+    m[:edge] = 0
     m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     n, lab, stats, cents = cv2.connectedComponentsWithStats(m)
     tops = [stats[i, cv2.CC_STAT_TOP] for i in range(1, n)
-            if stats[i, cv2.CC_STAT_AREA] > 60]
+            if stats[i, cv2.CC_STAT_AREA] > 60 and stats[i, cv2.CC_STAT_TOP] > edge]
     return min(tops) if tops else None
 
 
@@ -130,6 +136,7 @@ def track_delivery(cap, t_seed, calib, fps=8.0):
         dotlists.append([d for d in detect_dots(f)
                          if dcal["hog_y"] - 6 <= d[2] <= dcal["back_y"] + 8]
                         if f is not None else [])
+    fronts_raw = list(fronts)
 
     # median-smooth the front series (interpolating gaps) so single-sample
     # flickers don't split the slide into disqualified fragments
@@ -172,32 +179,51 @@ def track_delivery(cap, t_seed, calib, fps=8.0):
         if (seg and ts[b] - ts[a] >= 1.0 and seg[0] >= 225
                 and min(seg) <= dcal["hog_y"] + 12 and seg[0] - min(seg) >= 40):
             qual.append((a, b))
-    # the slide ends (front exits via the hogline) right as down-ice sweeping
-    # ramps up, i.e. near the motion-segment seed
+    # phase 4/5: the released stone is a handle dot strictly AHEAD of (above)
+    # the thrower's body blob, advancing across frames. The handle is covered
+    # by the hand until release, and clothing-colored dots (pink jackets read
+    # as red) move WITH the body, so the ahead-of-front constraint kills them.
+    chain = []
+    for i, ds in enumerate(dotlists):
+        front = fronts_raw[i] if fronts_raw[i] is not None else 360
+        ahead = [d for d in ds if d[2] < front - 3]
+        if not ahead:
+            continue
+        d = min(ahead, key=lambda d: d[2])
+        if chain and not (ts[i] - chain[-1][0] <= 2.0 and d[2] <= chain[-1][2] + 2
+                          and abs(d[1] - chain[-1][1]) < 15):
+            if len(chain) >= 2:
+                break  # established chain ended; ignore later noise
+            chain = []
+        chain.append((ts[i], d[1], d[2]))
+    if len(chain) >= 2 and chain[0][2] - chain[-1][2] >= 8:
+        t4 = chain[0][0]
+        below = [(t, y) for t, x, y in chain if y > dcal["hog_y"] + 3]
+        crossed = [(t, y) for t, x, y in chain if y <= dcal["hog_y"] + 3]
+        if crossed:
+            t5 = crossed[0][0]
+        elif len(below) >= 2 and below[-1][1] < below[0][1]:
+            # extrapolate the dot's velocity to the hogline (handle becomes
+            # too small to detect near the cam fringe)
+            (ta, ya), (tb, yb) = below[0], below[-1]
+            v = (ya - yb) / (tb - ta)
+            dt = (yb - (dcal["hog_y"] + 3)) / v
+            if 0 < dt <= 3.0:
+                t5 = tb + dt
+    # the slide ends (front exits via the hogline) right as the stone is
+    # released; anchor on the release when we have it, else on the down-ice
+    # motion-segment seed
     if qual:
-        a, b = min(qual, key=lambda q: abs(ts[q[1]] - t_seed))
+        anchor = t4 if t4 is not None else t_seed
+        near = [q for q in qual if anchor - 6 <= ts[q[1]] <= anchor + 2] if t4 else qual
+        pool = near or qual
+        a, b = min(pool, key=lambda q: abs(ts[q[1]] - anchor))
         t2 = ts[a]
+        if t4 is not None and t4 < t2:
+            t4 = t5 = None  # release can't precede the slide; drop as noise
     # phase 3 (backline cross) is not separately observable on this rink: the
     # thrower's body already extends past the backline at setup, and the stone
     # itself is hidden under the hand. Left blank.
-    # phase 4: the handle dot appears in the delivery zone once the hand lets
-    # go (it is covered during the slide)
-    if t2 is not None:
-        for i, ds in enumerate(dotlists):
-            if ts[i] <= t2 + 0.5:
-                continue
-            if any(dcal["hog_y"] + 4 <= d[2] <= dcal["back_y"] for d in ds):
-                t4 = ts[i]
-                break
-    # phase 5: dot reaches the delivery hogline (edge of this cam's view)
-    start5 = t4 if t4 is not None else t2
-    if start5 is not None:
-        for i, ds in enumerate(dotlists):
-            if ts[i] <= start5:
-                continue
-            if any(d[2] <= dcal["hog_y"] + 3 for d in ds):
-                t5 = ts[i]
-                break
     return t2, t3, t4, t5
 
 
@@ -273,6 +299,31 @@ def track_arrival(cap, s, e, calib, fps=8.0):
             d = max(added, key=lambda d: d[2])  # frontmost new stone
             x_px, y_px = d[1], d[2]
             method = "state-diff"
+            # anchored timing search: with the rest position known, look for
+            # the tiny fringe dots that blind chaining missed. t7 = first
+            # appearance at the rest position; t6 = last hogline-band crossing
+            # near the stone's lane before that.
+            at_rest, in_band = [], []
+            for t in np.arange(s + 2, e + 20, 0.25):
+                f = read_strip(cap, t)
+                if f is None:
+                    continue
+                for c, x, y in detect_dots(f, min_area=1):
+                    if (x - x_px) ** 2 + (y - y_px) ** 2 <= 16:
+                        at_rest.append(t)
+                    elif (acal["hog_y"] - 4 <= y <= acal["hog_y"] + 8
+                          and abs(x - x_px) < 18):
+                        in_band.append(t)
+            # first persistent appearance at rest
+            for i, t in enumerate(at_rest):
+                later = [u for u in at_rest if t < u <= t + 2.0]
+                if len(later) >= 2:
+                    t7 = t
+                    break
+            if t7 is not None:
+                before = [u for u in in_band if t7 - 25 <= u <= t7]
+                if before:
+                    t6 = before[-1]
         else:
             return t6, t7, None, None, "none"
     (cx, cy), (sx, sy) = acal["pin"], acal["px_per_in"]
