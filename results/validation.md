@@ -52,9 +52,22 @@ Per-shot phase coverage on the test end (16 shots):
 - slide begin: 16/16 (sweepers staged at the delivery hogline used to pin
   the body-front signal and mask the skip stones; mask-edge blobs are now
   excluded)
-- release (sweep-onset proxy): 14/16; near hogline: 11/16
-- far hogline: 12/16; stop: 16/16 (anchored search around the known rest
-  position recovers stops that blind chaining missed)
+- release (sweep-onset proxy): 14/16 — the two gaps (shots 5, 16) are
+  physical: zero stone-colored pixels exist in the delivery cam during
+  those windows (bodies fully occlude handle and brooms); fixing this
+  needs the down-ice panel, where the release is large and visible
+- near hogline: 16/16 (13 measured/extrapolated from the rock's own
+  track, 3 kinematically inferred)
+- far hogline: 16/16 (12 measured, 4 kinematically inferred); stop:
+  16/16 (anchored search around the known rest position recovers stops
+  that blind chaining missed)
+- kinematic inference: when one hogline crossing is invisible (lens
+  fringe + sweepers over the rock + red-on-red at the line), it is
+  computed from the measured anchors via a constant-deceleration model
+  (hog-to-hog = 72 ft, rest position known) with no free parameters;
+  cross-check on shot 1: model 37.1 s vs a one-frame handle flicker
+  observed at the line at 38.0 s. Inferred values are marked in the
+  'inferred' CSV column and inherit their anchors' errors (~±1-2 s)
 - resting position: 16/16 (12 from the arrival-cam dot track, 4 from the
   pre/post house-state diff fallback)
 
